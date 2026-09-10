@@ -1,0 +1,149 @@
+#!/usr/bin/env python3
+"""A small Waydroid experiment runner; it does not emulate Android itself."""
+
+import argparse
+import os
+from pathlib import Path
+import platform
+import shutil
+import subprocess
+import sys
+import zipfile
+
+ROOT = Path(__file__).resolve().parent
+EXTRAS = ROOT / ".external/waydroid_script"
+EXTRAS_REVISION = "d5289cfd8929e86e7f0dc89ecadcef8b66930eec"
+FORTNITE = "com.epicgames.fortnite"
+
+
+def run(*args, capture=False, timeout=30, cwd=None):
+    return subprocess.run(args, check=True, text=True, capture_output=capture,
+                          timeout=timeout, cwd=cwd)
+
+
+def require_waydroid():
+    if not shutil.which("waydroid"):
+        raise RuntimeError("Waydroid is missing. Run: sudo pacman -S --needed waydroid lzip")
+
+
+def prop(name):
+    value = run("waydroid", "prop", "get", name, capture=True).stdout.strip()
+    return value
+
+
+def require_boot():
+    require_waydroid()
+    if prop("sys.boot_completed") != "1":
+        raise RuntimeError("Android is not ready. Run ./fortnite-linux ui and wait for the home screen.")
+
+
+def require_arm():
+    require_boot()
+    abi = prop("ro.product.cpu.abilist").split(",")
+    bridge = prop("ro.dalvik.vm.native.bridge")
+    if "arm64-v8a" not in abi:
+        raise RuntimeError("Android does not advertise ARM64. Install the translation layer first.")
+    if platform.machine() == "x86_64" and bridge in ("", "0"):
+        raise RuntimeError("No Android native bridge is configured. Run ./fortnite-linux bridge-install.")
+
+
+def doctor():
+    print(f"Host: {platform.system()} {platform.release()} / {platform.machine()}")
+    print(f"Wayland display: {os.environ.get('WAYLAND_DISPLAY', 'missing')}")
+    print(f"Free project disk: {shutil.disk_usage(ROOT).free // (1024 ** 3)} GiB")
+    render = [p.name for p in Path('/dev/dri').glob('renderD*')
+              if os.access(p, os.R_OK | os.W_OK)]
+    print(f"Accessible GPU render nodes: {', '.join(render) or 'none'}")
+    filesystems = Path('/proc/filesystems').read_text()
+    print(f"Binder filesystem registered: {'yes' if 'binder' in filesystems.split() else 'no; inspect kernel support'}")
+    for tool in ("waydroid", "lzip"):
+        print(f"{tool}: {shutil.which(tool) or 'MISSING'}")
+    require_waydroid()
+    run("waydroid", "status")
+    require_boot()
+    for key in ("ro.build.version.release", "ro.product.cpu.abilist",
+                "ro.dalvik.vm.native.bridge", "ro.hardware.egl", "ro.hardware.vulkan"):
+        print(f"{key}: {prop(key) or '(unset)'}")
+    require_arm()
+    print("ARM64 is advertised and a native bridge is configured. Actual translation, graphics, and matchmaking still need testing.")
+
+
+def bridge_install():
+    require_boot()
+    if platform.machine() != "x86_64":
+        raise RuntimeError("This translation installer is only for x86_64 hosts.")
+    version = prop("ro.build.version.release")
+    if version not in ("11", "13"):
+        raise RuntimeError(f"Android {version!r} is not supported by the pinned installer. Do not force a different version.")
+    bridge = prop("ro.dalvik.vm.native.bridge")
+    if bridge not in ("", "0"):
+        raise RuntimeError(f"A native bridge is already configured ({bridge}); leaving it intact.")
+    if not shutil.which("lzip"):
+        raise RuntimeError("Install lzip first: sudo pacman -S --needed lzip")
+    python = EXTRAS / ".venv/bin/python"
+    if not python.exists():
+        raise RuntimeError("Translation installer is not prepared. Follow README.md, Translation installer setup.")
+    revision = run("git", "rev-parse", "HEAD", cwd=EXTRAS, capture=True).stdout.strip()
+    if revision != EXTRAS_REVISION:
+        raise RuntimeError("Unexpected translation installer revision; see README.md.")
+    # Authenticate before stopping the user's session. No password is read by this program.
+    run("sudo", "-v", timeout=None)
+    run("waydroid", "session", "stop")
+    run("sudo", str(python), "main.py", "-a", version, "install", "libndk",
+        cwd=EXTRAS, timeout=None)
+    run("sudo", "systemctl", "restart", "waydroid-container.service", timeout=120)
+    print("Translation installation command completed. Run ./fortnite-linux ui, then ./fortnite-linux doctor.")
+
+
+def install_apk(path):
+    apk = Path(path).expanduser().resolve()
+    if not apk.is_file() or not zipfile.is_zipfile(apk):
+        raise RuntimeError("Supply a local APK downloaded from Epic's official Android page.")
+    with zipfile.ZipFile(apk) as archive:
+        if "AndroidManifest.xml" not in archive.namelist():
+            raise RuntimeError("The archive is not an APK (AndroidManifest.xml is missing).")
+    require_arm()
+    run("waydroid", "app", "install", str(apk), timeout=300)
+    print("Install command returned. Confirm the app appears in Android; Waydroid may report installation errors without a failing exit code.")
+
+
+def main():
+    parser = argparse.ArgumentParser(description=__doc__)
+    commands = parser.add_subparsers(dest="command", required=True)
+    for name, help_text in (("doctor", "Read host and Android readiness"),
+                            ("ui", "Open Android; may remain attached until the session stops"),
+                            ("bridge-install", "Install the pinned third-party libndk bridge using sudo"),
+                            ("play", "Launch installed Fortnite")):
+        commands.add_parser(name, help=help_text)
+    commands.add_parser("install-apk", help="Install a local official APK").add_argument("apk")
+    args = parser.parse_args()
+    if args.command == "doctor":
+        doctor()
+    elif args.command == "bridge-install":
+        bridge_install()
+    elif args.command == "install-apk":
+        install_apk(args.apk)
+    elif args.command == "ui":
+        require_waydroid()
+        if not os.environ.get("WAYLAND_DISPLAY"):
+            raise RuntimeError("Run from a terminal in your Wayland desktop session.")
+        run("waydroid", "show-full-ui", timeout=None)
+    elif args.command == "play":
+        require_arm()
+        apps = run("waydroid", "app", "list", capture=True).stdout
+        packages = [line.split(":", 1)[1].strip() for line in apps.splitlines()
+                    if line.strip().startswith("packageName:")]
+        if FORTNITE not in packages:
+            raise RuntimeError("Fortnite is not installed. Install it through Epic Games Store inside Android.")
+        run("waydroid", "app", "launch", FORTNITE, timeout=None)
+        print("Launch requested. A completed online match is the acceptance test.")
+
+
+if __name__ == "__main__":
+    try:
+        main()
+    except (RuntimeError, OSError, subprocess.SubprocessError) as error:
+        print(f"STOP: {error}", file=sys.stderr)
+        sys.exit(1)
+    except KeyboardInterrupt:
+        sys.exit(130)

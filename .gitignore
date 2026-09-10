@@ -1,0 +1,11 @@
+.external/
+.diagnostics/
+__pycache__/
+*.py[cod]
+*.apk
+*.apks
+*.xapk
+*.log
+*-backup-*.json
+.env
+.env.*
