@@ -3,32 +3,34 @@
 An experimental Waydroid setup and a record of a September 9, 2026 test on Arch Linux.
 **This did not produce a verified, playable online Fortnite setup.** Installation,
 login, rendering, and controller input worked, but the user reported being kicked
-from a match with a generic poor-connection/VPN/proxy message. No full online match
-was completed successfully.
+from a match after constant in-game stutters attributed by the user to ping.
+The game was also capped at 30 FPS; that cap was separate from the stuttering
+and does not account for all of the reported poor performance. No full online
+match was completed successfully.
 
-The exact kick text was not captured. It does not prove that a VPN was present,
-that anti-cheat rejected Waydroid, or that the network was the underlying cause.
+The removal screen is preserved below. Its broad wording does not establish
+which listed condition caused the kick.
 This repository contains troubleshooting helpers and findings, not a Fortnite port.
 
 ## Results
 
 | Stage | Observed result |
 | --- | --- |
-| Android boot and networking | Worked after narrow UFW rules allowed DHCP, DNS, and forwarding. |
 | Epic Games Store | Worked when explicitly installed with the ARM64 ABI. Default ABI selection crashed the tested APK. |
 | Fortnite download and launch | Worked through the official Epic Games Store. |
 | Epic login and onboarding | Worked using injected Android touchscreen presses where mouse clicks failed. |
 | Keyboard and mouse | Android detected both; Fortnite's mobile interface did not provide usable native gameplay controls. |
 | Xbox Series S\|X controller over USB | Worked after publishing its Linux input device inside Android. |
 | Graphics | Android compositor used AMD hardware rendering. The game's full rendering path was not independently profiled. |
-| Frame rate | User reported a 30 FPS limit and poor performance. No benchmark or successful FPS unlock was recorded. |
+| Frame rate | The game was capped at 30 FPS. No successful FPS unlock was recorded. |
+| In-game stuttering | User reported constant stutters associated with ping before being kicked. This was an additional performance problem, not simply the 30 FPS cap. |
 | USB debugging warning | ADB and developer settings were disabled and verified. |
-| Online gameplay | User entered a match but was kicked. The test ended without a completed match. |
+| Online gameplay | User entered a match, experienced constant stutters attributed to ping, and then received the removal message shown below. No match was completed. |
 
 ## Tested environment
 
 - Arch Linux, kernel `7.2.4-arch1-2`, built-in Rust Binder, Hyprland/Wayland.
-- Ryzen 5 9600X, approximately 30 GiB RAM, AMD Navi 23 / Radeon RX 6600 family GPU.
+- Ryzen 5 9600X, 32 GB DDR5-6400 RAM (user-reported specification), AMD Navi 23 / Radeon RX 6600 family GPU.
 - Waydroid Android 13, x86-64, VANILLA system and MAINLINE vendor images.
 - `libndk_translation.so`, advertised bridge version `0.2.3`, for ARM64 code.
 - `ro.hardware.egl=mesa`, `ro.hardware.vulkan=radeon`.
@@ -60,21 +62,10 @@ Diagnostics remain under ignored `.diagnostics/`. They can contain account or de
 information and should be reviewed before sharing. No raw diagnostics, account data,
 APKs, game assets, or third-party binary dependencies are included here.
 
-## Setup used in this experiment
+## ARM64 translation setup
 
-Follow [Waydroid's installation documentation](https://docs.waydro.id/usage/install-on-desktops)
-for your distribution. On this Arch system, the setup used:
-
-```bash
-sudo pacman -S --needed waydroid lzip
-sudo waydroid init -s VANILLA
-sudo systemctl start waydroid-container.service
-./fortnite-linux ui
-```
-
-This is a historical reproduction path, not a promise that current images will work.
-The bridge wrapper only accepts Android 11 or 13. Follow Arch's normal full-update
-procedure when needed; do not refresh package databases alone with `pacman -Sy`.
+These historical reproduction steps assume Waydroid is already installed and
+running. The bridge wrapper accepts Android 11 or 13; current images may differ.
 
 Prepare the translation installer before using `bridge-install`:
 
@@ -91,22 +82,6 @@ python -m venv .external/waydroid_script/.venv
 Installer source is pinned; its Python dependencies and downloaded translation
 payloads are not fully locked by this repository. Do not install competing native
 bridges together. The wrapper refuses to replace a configured bridge.
-
-### Network
-
-The test used UFW with incoming and forwarded traffic blocked. Waydroid initially
-had no working DHCP lease. These rules resolved the observed networking failure:
-
-```bash
-sudo ufw allow in on waydroid0 proto udp to any port 67
-sudo ufw allow in on waydroid0 proto udp to 192.168.240.1 port 53
-sudo ufw allow in on waydroid0 proto tcp to 192.168.240.1 port 53
-sudo ufw route allow in on waydroid0 from 192.168.240.0/24 to any
-```
-
-Use the actual bridge/subnet on your host. These rules are specific to this UFW
-setup, not a universal networking fix. The later match kick was not diagnosed as
-being caused by UFW. See [Waydroid networking](https://docs.waydro.id/debugging/networking-issues).
 
 ### Epic Games Store installation
 
@@ -183,9 +158,32 @@ ro.debuggable: 0
 ```
 
 This follows [Epic's instruction to disable developer options](https://www.epicgames.com/help/c-34254770/c-38015632/a25494421).
-It does not spoof hardware identity or alter integrity results. The subsequent
-user-reported match kick remained unresolved. Disabling debugging did not establish
-that Waydroid was eligible for online play.
+It does not spoof hardware identity or alter integrity results. Disabling debugging
+did not establish that Waydroid was eligible for online play.
+
+### What happened in the match
+
+After login and the controller repair, the user entered a match. During gameplay,
+there were constant stutters that the user attributed to ping. The game was capped
+at 30 FPS, but the stuttering was a separate reported issue; poor performance was
+not solely the result of the frame-rate cap. No ping trace, packet-loss measurement,
+or frame-time capture was collected to separate network interruptions from render
+or translation stalls.
+
+The game then removed the user from the match and displayed **“THERE WAS AN ERROR”**:
+
+> You were removed from the match due to internet lag, your IP or machine,
+> VPN usage, or for cheating. We recommend not utilizing VPN or proxy
+> services while attempting to play Fortnite.
+
+The visible error identifier was `errors.com.epicgames.common.processing`.
+
+![Fortnite match-removal message](docs/match-removal.png)
+
+This screenshot confirms the removal and its wording. It does not identify which
+of the listed reasons applied, demonstrate that a VPN or proxy was in use, or prove
+an anti-cheat rejection. The reported ping-related stutters preceded the kick, but
+the cause was not isolated. The experiment ended at this point.
 
 ## Stopping and removing the experiment
 
