@@ -46,3 +46,15 @@ Error code: `errors.com.epicgames.common.processing`
 The message lists several possible reasons; it does not identify which caused this
 kick. VPN use, an anti-cheat rejection, and the underlying network cause were not
 confirmed. Launching Fortnite worked, but reliable online play was not demonstrated.
+
+## Experiment scripts
+
+The original helpers are included for reference and reproduction:
+
+- [`fortnite-linux`](fortnite-linux): readiness checks, full UI, ARM translation installation, APK installation, and launching.
+- [`connect-controller.py`](connect-controller.py): temporary Xbox controller input repair.
+- [`diagnose-signin.py`](diagnose-signin.py): local sign-in and input diagnostics.
+- [`prepare-game.py`](prepare-game.py): disable Android debugging and collect graphics diagnostics.
+
+See [script usage and limitations](docs/SCRIPTS.md). These helpers do not resolve
+the match-removal error or unlock the frame-rate cap.
