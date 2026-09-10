@@ -1,7 +1,6 @@
 # Fortnite on Linux through Waydroid
 
-Findings from a September 9, 2026 test. Fortnite launched, login worked, and a match
-could be entered, but gameplay stuttered and ended in a kick. No full match was completed.
+Fortnite launched, login worked, and a match could be entered, but gameplay stuttered and ended in a kick. No full match was completed.
 
 ## Environment
 
